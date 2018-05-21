@@ -105,7 +105,7 @@ hlist_t header_list = NULL;			/* forward_request() */
 hlist_t users_list = NULL;			/* socks5_thread() */
 plist_t scanner_agent_list = NULL;		/* scanner_hook() */
 plist_t noproxy_list = NULL;			/* proxy_thread() */
-//plist_t noproxyif_list = NULL;			/* proxy_thread() */
+plist_t black_list = NULL;			/* proxy_thread() */
 
 /*
  * General signal handler. If in debug mode, quit immediately.
@@ -294,10 +294,24 @@ plist_t noproxy_add(plist_t list, char *spec) {
 	return list;
 }
 
-int noproxy_match(const char *addr) {
-	plist_t list;
+plist_t black_list_add(plist_t list, char *spec) {
+	char *tok, *save;
 
-	list = noproxy_list;
+	tok = strtok_r(spec, ", ", &save);
+	while ( tok != NULL ) {
+		if (debug)
+			printf("Adding blacklist entry: '%s'\n", tok);
+		char*  tok_dup = NULL;
+		asprintf(&tok_dup, "*%s*", tok);
+		list = plist_add(list, 0, tok_dup);
+		tok = strtok_r(NULL, ", ", &save);
+	}
+
+	return list;
+}
+
+
+int list_fnmatch(plist_t list, const char *addr) {
 	while (list) {
 		if (list->aux && strlen(list->aux)
 				&& fnmatch(list->aux, addr, 0) == 0) {
@@ -311,6 +325,14 @@ int noproxy_match(const char *addr) {
 	}
 
 	return 0;
+}
+
+int noproxy_match(const char *addr) {
+	return list_fnmatch(noproxy_list, addr);
+}
+
+int black_match(const char *url) {
+	return list_fnmatch(black_list, url);
 }
 
 int lan_should_go_directly()
@@ -342,11 +364,24 @@ void *proxy_thread(void *thread_data) {
 			free_rr_data(request);
 			break;
 		}
-
+		/*
+		 * Check black list.
+		 */
+		if (black_match(request->hostname)) {
+			printf("black_match: request=%s is blacklisted.\n", request->hostname);
+            char* deniedpagebuf = gen_denied_page(request->hostname);
+            (void)write(cd, deniedpagebuf, strlen(deniedpagebuf));
+            free(deniedpagebuf);
+			free_rr_data(request);
+			break;
+		}
+		/*
+		 * serve request
+		 */
 		do {
 			/*
-			 * Are we being returned a request by forward_request or direct_request?
-			 */
+			* Are we being returned a request by forward_request or direct_request?
+			*/
 			if (ret) {
 				free_rr_data(request);
 				request = ret;
@@ -727,7 +762,7 @@ int main(int argc, char **argv) {
 	syslog(LOG_INFO, "Starting cntlm version " VERSION " for LITTLE endian\n");
 #endif
 
-	while ((i = getopt(argc, argv, ":-:T:a:c:d:fghIl:p:r:su:vw:A:BD:F:G:HL:M:N:O:P:R:S:U:")) != -1) {
+	while ((i = getopt(argc, argv, ":-:T:a:c:d:fghIl:p:r:su:vw:A:BD:F:G:HL:M:N:b:O:P:R:S:U:")) != -1) {
 		switch (i) {
 			case 'A':
 			case 'D':
@@ -792,6 +827,11 @@ int main(int argc, char **argv) {
 				noproxy_list = noproxy_add(noproxy_list, tmp=strdup(optarg));
 				free(tmp);
 				break;
+			case 'b':
+				black_list = black_list_add(black_list, tmp=strdup(optarg));
+				free(tmp);
+				break;
+
 			case 'O':
 				listen_add("SOCKS5 proxy", &socksd_list, optarg, gateway);
 				break;
@@ -919,6 +959,8 @@ int main(int argc, char **argv) {
 				"\t    Magic autodetection of proxy's NTLM dialect.\n");
 		fprintf(stderr, "\t-N  \"<hostname_wildcard1>[, <hostname_wildcardN>\"\n"
 				"\t    List of URL's to serve direcly as stand-alone proxy (e.g. '*.local')\n");
+		fprintf(stderr, "\t-b  \"<hostname_wildcard1>[, <hostname_wildcardN>\"\n"
+				"\t    List of URL's which will not be served (black-listed)\n");
 		fprintf(stderr, "\t-O  [<saddr>:]<lport>\n"
 				"\t    Enable SOCKS5 proxy on port lport (binding to address saddr)\n");
 		fprintf(stderr, "\t-P  <pidfile>\n"
@@ -1123,13 +1165,13 @@ int main(int argc, char **argv) {
 			free(tmp);
 		}
 
-                /*while ((tmp = config_pop(cf, "NoProxyIf"))) {
-                    if (strlen(tmp)) {
-                        noproxy_list = noproxy_add(noproxyif_list, tmp);
-                        printf("DBG: NoProxyIf: %s\n", tmp);
-                    }
-                    free(tmp);
-                }*/
+		while ((tmp = config_pop(cf, "BlackList"))) {
+			if (strlen(tmp)) {
+				black_list = black_list_add(black_list, tmp);
+				printf("DBG: BlackList: %s\n", tmp);
+			}
+			free(tmp);
+		}
 
 		while ((tmp = config_pop(cf, "SOCKS5Users"))) {
 			head = strchr(tmp, ':');
@@ -1648,6 +1690,7 @@ bailout:
 	hlist_free(header_list);
 	plist_free(scanner_agent_list);
 	plist_free(noproxy_list);
+	plist_free(black_list);
 	plist_free(tunneld_list);
 	plist_free(proxyd_list);
 	plist_free(socksd_list);
