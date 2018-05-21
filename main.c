@@ -368,10 +368,10 @@ void *proxy_thread(void *thread_data) {
 		 * Check black list.
 		 */
 		if (black_match(request->hostname)) {
-			printf("black_match: request=%s is blacklisted.\n", request->hostname);
-            char* deniedpagebuf = gen_denied_page(request->hostname);
-            (void)write(cd, deniedpagebuf, strlen(deniedpagebuf));
-            free(deniedpagebuf);
+			syslog(LOG_WARNING, "black-listed request: %s", request->hostname);
+			char* deniedpagebuf = gen_denied_page(request->hostname);
+			(void)write(cd, deniedpagebuf, strlen(deniedpagebuf));
+			free(deniedpagebuf);
 			free_rr_data(request);
 			break;
 		}
