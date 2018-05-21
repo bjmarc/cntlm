@@ -71,6 +71,7 @@ int debug = 0;					/* all debug printf's and possibly external modules */
 
 struct auth_s *g_creds = NULL;			/* throughout the whole module */
 
+int g_direct_flag = 0;
 int quit = 0;					/* sighandler() */
 int ntlmbasic = 0;				/* forward_request() */
 int serialize = 0;
@@ -104,11 +105,17 @@ hlist_t header_list = NULL;			/* forward_request() */
 hlist_t users_list = NULL;			/* socks5_thread() */
 plist_t scanner_agent_list = NULL;		/* scanner_hook() */
 plist_t noproxy_list = NULL;			/* proxy_thread() */
+//plist_t noproxyif_list = NULL;			/* proxy_thread() */
 
 /*
  * General signal handler. If in debug mode, quit immediately.
  */
 void sighandler(int p) {
+        if (p == SIGUSR1) {
+            g_direct_flag = ! g_direct_flag;
+            syslog(LOG_INFO, "Signal USR1 received, g_direct_flag = %d", g_direct_flag);
+            return;
+        }
 	if (!quit)
 		syslog(LOG_INFO, "Signal %d received, issuing clean shutdown\n", p);
 	else
@@ -306,6 +313,12 @@ int noproxy_match(const char *addr) {
 	return 0;
 }
 
+int lan_should_go_directly()
+{
+    printf("DBG: g_direct_flag=%d\n", g_direct_flag);
+    return g_direct_flag;
+}
+
 /*
  * Proxy thread - decide between direct and forward based on NoProxy
  */
@@ -341,7 +354,7 @@ void *proxy_thread(void *thread_data) {
 
 			keep_alive = hlist_subcmp(request->headers, "Proxy-Connection", "keep-alive");
 
-			if (noproxy_match(request->hostname))
+			if (noproxy_match(request->hostname) || lan_should_go_directly())
 				ret = direct_request(thread_data, request);
 			else
 				ret = forward_request(thread_data, request);
@@ -1110,6 +1123,14 @@ int main(int argc, char **argv) {
 			free(tmp);
 		}
 
+                /*while ((tmp = config_pop(cf, "NoProxyIf"))) {
+                    if (strlen(tmp)) {
+                        noproxy_list = noproxy_add(noproxyif_list, tmp);
+                        printf("DBG: NoProxyIf: %s\n", tmp);
+                    }
+                    free(tmp);
+                }*/
+
 		while ((tmp = config_pop(cf, "SOCKS5Users"))) {
 			head = strchr(tmp, ':');
 			if (!head) {
@@ -1446,6 +1467,7 @@ int main(int argc, char **argv) {
 	signal(SIGINT, &sighandler);
 	signal(SIGTERM, &sighandler);
 	signal(SIGHUP, &sighandler);
+	signal(SIGUSR1, &sighandler);
 
 	/*
 	 * Initialize the random number generator
