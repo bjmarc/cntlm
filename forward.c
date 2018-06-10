@@ -95,7 +95,7 @@ int proxy_connect(struct auth_s *credentials) {
 	} while (i < 0 && ++loop < parent_count);
 
 	if (i < 0 && loop >= parent_count) {
-		syslog(LOG_ERR, "No proxy on the list works. You lose -> g_direct_flag=1.\n");
+		syslog(LOG_ERR, "No proxy on the list works -> Will connect directy (g_direct_flag=1).\n");
 		extern int g_direct_flag;
 		g_direct_flag = 1;
     }

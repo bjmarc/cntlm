@@ -113,7 +113,7 @@ plist_t black_list = NULL;			/* proxy_thread() */
 void sighandler(int p) {
         if (p == SIGUSR1) {
             g_direct_flag = ! g_direct_flag;
-            syslog(LOG_INFO, "Signal USR1 received, g_direct_flag = %d", g_direct_flag);
+            syslog(LOG_WARNING, "Signal USR1 received, g_direct_flag = %d", g_direct_flag);
             return;
         }
 	if (!quit)
@@ -368,7 +368,7 @@ void *proxy_thread(void *thread_data) {
 		 * Check black list.
 		 */
 		if (black_match(request->hostname)) {
-			syslog(LOG_WARNING, "black-listed request: %s", request->hostname);
+			syslog(LOG_WARNING, "black-listed hostname: %s", request->hostname);
 			char* deniedpagebuf = gen_denied_page(request->hostname);
 			(void)write(cd, deniedpagebuf, strlen(deniedpagebuf));
 			free(deniedpagebuf);
